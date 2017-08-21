@@ -1,6 +1,9 @@
 package com.arcgis.android.handsonapp;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.drawable.BitmapDrawable;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -14,6 +17,7 @@ import com.esri.arcgisruntime.data.ServiceFeatureTable;
 import com.esri.arcgisruntime.geometry.GeometryEngine;
 import com.esri.arcgisruntime.geometry.Point;
 import com.esri.arcgisruntime.geometry.Polygon;
+import com.esri.arcgisruntime.layers.FeatureLayer;
 import com.esri.arcgisruntime.loadable.LoadStatus;
 import com.esri.arcgisruntime.mapping.ArcGISMap;
 import com.esri.arcgisruntime.mapping.LayerList;
@@ -22,9 +26,9 @@ import com.esri.arcgisruntime.mapping.view.Graphic;
 import com.esri.arcgisruntime.mapping.view.GraphicsOverlay;
 import com.esri.arcgisruntime.mapping.view.MapView;
 import com.esri.arcgisruntime.portal.Portal;
-import com.esri.arcgisruntime.portal.PortalItem;
 import com.esri.arcgisruntime.security.AuthenticationManager;
 import com.esri.arcgisruntime.security.DefaultAuthenticationChallengeHandler;
+import com.esri.arcgisruntime.symbology.PictureMarkerSymbol;
 import com.esri.arcgisruntime.symbology.SimpleFillSymbol;
 import com.esri.arcgisruntime.symbology.SimpleLineSymbol;
 import com.esri.arcgisruntime.symbology.SimpleMarkerSymbol;
@@ -58,36 +62,51 @@ public class MainActivity extends AppCompatActivity {
     // デバッグタグ
     public String TAG = "☆esrijapan☆";
 
+    // 表示用Overlay
+    public GraphicsOverlay mPointRouteOverlay = new GraphicsOverlay();
+    public GraphicsOverlay mBufferGraphicOverlay = new GraphicsOverlay();
+
+    // 使用するURL
+    /** WebMap URL */
+    public String mWebMapURL = "https://www.arcgis.com/home/item.html?id=285f619f75e64d3681ba101b006d2f65";
+    /** 最寄り施設解析 URL */
+    public String mClosestFacilityTask = "http://route.arcgis.com/arcgis/rest/services/World/ClosestFacility/NAServer/ClosestFacility_World";
+    /** ArcGIS Online ポータルサイト URL */
+    public String mPortalURL = "http://www.arcgis.com";
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // ユーザー アカウント情報で ArcGIS Online / ArcGISポータルへログインし認証情報を取得します
-        // ログインのための入力フォームが表示されます。
-        DefaultAuthenticationChallengeHandler handler = new DefaultAuthenticationChallengeHandler(this);
-        AuthenticationManager.setAuthenticationChallengeHandler(handler);
-
-        // Web マップの読み込み/表示
-        Portal portal = new Portal("http://www.arcgis.com");
-        PortalItem portalItem = new PortalItem(portal,"285f619f75e64d3681ba101b006d2f65");
-        mArcGISMap = new ArcGISMap(portalItem);
-        // view の作成
         mMapView = (MapView) findViewById(R.id.mapView);
-        mMapView.setMap(mArcGISMap);
+        // 課題のwebmapを表示する
+        callwebMap();
+        // レイヤに対しての動作を実装する
+        operation4Map();
+    }
 
+    /**
+     * 課題のwebmapを表示する
+     * */
+    public void callwebMap(){
+
+        // WebMap URL
+        mArcGISMap = new ArcGISMap(mWebMapURL);
+        mMapView.setMap(mArcGISMap);
         mArcGISMap.addDoneLoadingListener(new Runnable() {
             @Override
             public void run() {
                 if(mArcGISMap.getLoadStatus() == LoadStatus.LOADED){
-                    // Graphicで表示する準備
                     // 操作対象レイヤーを求める
                     selectOperationalLayer();
-                    // レイヤに対しての動作を実装する
-                    operation4Map();
+                }else {
+                    Log.d(TAG, "callwebMap: " + mArcGISMap.getLoadStatus());
                 }
             }
         });
+        mArcGISMap.loadAsync();
     }
 
     /**
@@ -98,10 +117,13 @@ public class MainActivity extends AppCompatActivity {
 
         LayerList layerList = mArcGISMap.getOperationalLayers();
         for(int i  =  0 ; i < layerList.size() ; i++){
-            if(layerList.get(i).getItem().getTitle().equals("室蘭市 - 避難場所")){
+            String layername = layerList.get(i).getName();
+            Log.d(TAG, "selectOperationalLayer: " + layername);
+            if(layername.equals("室蘭市 - 避難場所")){
                 mAnalysisLayerIndex = i;
             }
         }
+
     }
 
     /**
@@ -117,11 +139,27 @@ public class MainActivity extends AppCompatActivity {
             public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
                 Log.d(TAG, "onSingleTapConfirmed: " + motionEvent.toString());
 
+                // Overlayの初期化
+                if((mPointRouteOverlay.getGraphics().size() != 0) || (mBufferGraphicOverlay.getGraphics().size() != 0)){
+                    mPointRouteOverlay.getGraphics().clear();
+                    mBufferGraphicOverlay.getGraphics().clear();
+                }else{
+                    mMapView.getGraphicsOverlays().add(mPointRouteOverlay);
+                    mMapView.getGraphicsOverlays().add(mBufferGraphicOverlay);
+                }
+
                 // Android の画面位置を取得
                 android.graphics.Point screenPoint = new android.graphics.Point(Math.round(motionEvent.getX()),Math.round(motionEvent.getY()));
                 // ArcGISのポイントに変換する
                 touchPoint = mMapView.screenToLocation(screenPoint);
-                // TODO タッチしたポイントを表示する
+                // タッチしたポイントを表示する
+                Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+                // new するやり方はAPI4から非推奨:new BitmapDrawable(bitmap);
+                BitmapDrawable bd = new BitmapDrawable(getResources(), bitmap);
+                PictureMarkerSymbol pms = new PictureMarkerSymbol(bd);
+                pms.loadAsync();
+                Graphic touchpoint = new Graphic(touchPoint, pms);
+                mPointRouteOverlay.getGraphics().add(touchpoint);
 
                 // ポイントからバッファを作成する:単位=m
                 Polygon bufferPolygon = GeometryEngine.buffer(touchPoint, 1000);
@@ -129,9 +167,7 @@ public class MainActivity extends AppCompatActivity {
                 SimpleFillSymbol fillSymbol = new SimpleFillSymbol(SimpleFillSymbol.Style.SOLID, Color.argb(50, 230, 0, 51), null);// 薄い赤だったと思う
                 Graphic bufferGraphic = new Graphic(bufferPolygon, fillSymbol);
                 // bufferを地図に追加する
-                GraphicsOverlay BufferGraphicsOverlay = new GraphicsOverlay();
-                mMapView.getGraphicsOverlays().add(BufferGraphicsOverlay);
-                BufferGraphicsOverlay.getGraphics().add(bufferGraphic);
+                mBufferGraphicOverlay.getGraphics().add(bufferGraphic);
 
                 // レイヤーからバッファ内のフィーチャを検索する
                 findFeaturefromBuffer(bufferPolygon);
@@ -145,20 +181,20 @@ public class MainActivity extends AppCompatActivity {
      * レイヤーからバッファ内のフィーチャを検索する
      * */
     private void findFeaturefromBuffer(Polygon pPolygon){
+        Log.d(TAG, "findFeaturefromBuffer ");
 
         // 検索パラメータの作成
         QueryParameters queryParameter = new QueryParameters();
         queryParameter.setGeometry(pPolygon);
         queryParameter.setSpatialRelationship(QueryParameters.SpatialRelationship.CONTAINS);
 
-        // TODO 現在ポイントのクリア
-
         // 表示用シンボル定義
         final SimpleMarkerSymbol markerSymbol = new SimpleMarkerSymbol(SimpleMarkerSymbol.Style.CIRCLE, Color.RED, 10);
         // 最寄り施設解析用のオブジェクト
         final List<Incident> incidentList = new ArrayList();
         // bufferとフィーチャレイヤの計算
-        ServiceFeatureTable serviceFeatureTable = new ServiceFeatureTable("IDとかでもってきたら確実かね+indexのつかいどころ");
+        FeatureLayer targetLayer = (FeatureLayer)mArcGISMap.getOperationalLayers().get(mAnalysisLayerIndex);
+        ServiceFeatureTable serviceFeatureTable = (ServiceFeatureTable)targetLayer.getFeatureTable();
         final ListenableFuture<FeatureQueryResult>  queryResult = serviceFeatureTable.queryFeaturesAsync(queryParameter);
         queryResult.addDoneListener(new Runnable() {
             @Override
@@ -169,25 +205,46 @@ public class MainActivity extends AppCompatActivity {
                     result = queryResult.get();
                     // 表示用
                     Graphic resultPointGraphic = null;
-                    GraphicsOverlay PointGraphicsOverlay = new GraphicsOverlay();
-                    mMapView.getGraphicsOverlays().add(PointGraphicsOverlay);
-
                     // 結果を処理する
                     for (Iterator<Feature> features = result.iterator(); features.hasNext();) {
                         Feature feature = features.next();
                         incidentList.add(new Incident((Point)feature.getGeometry()));
                         // 表示処理
                         resultPointGraphic = new Graphic(feature.getGeometry(),markerSymbol);// ポイントだと信じている
-                        PointGraphicsOverlay.getGraphics().add(resultPointGraphic);
+                        mPointRouteOverlay.getGraphics().add(resultPointGraphic);
                     }
-
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 } catch (ExecutionException e) {
                     e.printStackTrace();
                 }
                 //　解析機能を呼び出す
-                searchNearestPoint(incidentList);
+                callPortalLogin4Analytics(incidentList);
+            }
+        });
+    }
+
+    /**
+     * 解析のためにポータルにログインする
+     * */
+    public void callPortalLogin4Analytics(final List<Incident> pIncident){
+        Log.d(TAG, "callPortalLogin4Analytics ");
+
+        // ユーザー アカウント情報で ArcGIS Online / ArcGISポータルへログインし認証情報を取得します
+        // ログインのための入力フォームが表示されます。
+        DefaultAuthenticationChallengeHandler handler = new DefaultAuthenticationChallengeHandler(this);
+        AuthenticationManager.setAuthenticationChallengeHandler(handler);
+
+        final Portal portal = new Portal(mPortalURL,true);
+        portal.loadAsync();
+        portal.addDoneLoadingListener(new Runnable() {
+            @Override
+            public void run() {
+
+                if(portal.getLoadStatus() == LoadStatus.LOADED){
+                    // アイテムの呼び出し
+                    searchNearestPoint(pIncident,portal);
+                }
             }
         });
     }
@@ -196,10 +253,12 @@ public class MainActivity extends AppCompatActivity {
      * 検索したフィーチャを対象に最寄り施設解析を実行
      *
      * */
-    private void searchNearestPoint(final List<Incident> pIncident){
+    private void searchNearestPoint(final List<Incident> pIncident,final Portal portal){
+        Log.d(TAG, "searchNearestPoint ");
 
         // 最寄り施設解析を実装するためのtaskを作成し、実行のためのパラメータを取得する
-        final ClosestFacilityTask closestFacilityTask = new ClosestFacilityTask(this, "http://route.arcgis.com/arcgis/rest/services/World/ClosestFacility/NAServer/ClosestFacility_World");
+        final ClosestFacilityTask closestFacilityTask = new ClosestFacilityTask(this, mClosestFacilityTask);
+        closestFacilityTask.setCredential(portal.getCredential());
         final ListenableFuture<ClosestFacilityParameters> paramsFuture = closestFacilityTask.createDefaultParametersAsync();
         paramsFuture.addDoneListener(new Runnable() {
             @Override
@@ -209,8 +268,6 @@ public class MainActivity extends AppCompatActivity {
                     final ClosestFacilityParameters closestFacilityParameters = paramsFuture.get();
 
                     // 表示の準備
-                    final GraphicsOverlay ClosestFacilityOverlay = new GraphicsOverlay();
-                    mMapView.getGraphicsOverlays().add(ClosestFacilityOverlay);
                     final SimpleLineSymbol lineSymbol = new SimpleLineSymbol(SimpleLineSymbol.Style.SOLID, Color.RED, 2);
 
                     // タッチしたポイントがFacility(このポイントを基準に最寄り施設を解析する)
@@ -230,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
                                 // 実行結果からルートをラインシンボルとして表示する
                                 ClosestFacilityResult result = (ClosestFacilityResult) resultFuture.get();
                                 ClosestFacilityRoute closestFacilityRoute = result.getRoute(0, 0);
-                                ClosestFacilityOverlay.getGraphics().add(new Graphic(closestFacilityRoute.getRouteGeometry(),lineSymbol));
+                                mPointRouteOverlay.getGraphics().add(new Graphic(closestFacilityRoute.getRouteGeometry(),lineSymbol));
                             } catch (Throwable e) {
                                 Log.e(TAG,e.toString());
                             }
@@ -242,18 +299,4 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
-
-    // TODO
-//    サンプル概要
-//
-//    避難場所を表示するマップ。クリックした地点から最寄りの避難場所への経路を表示する機能を提供
-//
-//    Web マップの読み込み、表示
-//    最寄り施設の解析（ClosestFacilityTask）
-//    Web マップに含まれる避難場所のレイヤーを取得
-//    クリックした地点から 1km のバッファーを作成、表示
-//            避難場所レイヤーからバッファー内のフィーチャを検索
-//    検索したフィーチャを対象に最寄り施設解析を実行
-//            解析結果として返ってきた最寄り施設までのルートを表示
-
 }
