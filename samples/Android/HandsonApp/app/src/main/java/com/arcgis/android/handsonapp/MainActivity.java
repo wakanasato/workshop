@@ -56,6 +56,7 @@ import java.util.concurrent.ExecutionException;
  * */
 public class MainActivity extends AppCompatActivity {
 
+    // ArcGIS の必須オブジェクト
     public MapView mMapView;
     public ArcGISMap mArcGISMap;
 
@@ -74,6 +75,10 @@ public class MainActivity extends AppCompatActivity {
     /** ArcGIS Online ポータルサイト URL */
     public String mPortalURL = "http://www.arcgis.com";
 
+    // 解析するレイヤーのインデックス番号(検索結果)
+    public int mAnalysisLayerIndex;
+    // 画面をタッチしたポイント(表示および解析に使用する)
+    public Point mTouchPoint;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,7 +117,6 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 該当レイヤーを検索する
      * */
-    public int mAnalysisLayerIndex;
     private void selectOperationalLayer(){
 
         LayerList layerList = mArcGISMap.getOperationalLayers();
@@ -128,8 +132,8 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 地図に対する操作を定義する
+     *
      * */
-    public Point touchPoint;
     private void operation4Map() {
 
         // クリックした地点から 1km のバッファーを作成、表示
@@ -151,18 +155,18 @@ public class MainActivity extends AppCompatActivity {
                 // Android の画面位置を取得
                 android.graphics.Point screenPoint = new android.graphics.Point(Math.round(motionEvent.getX()),Math.round(motionEvent.getY()));
                 // ArcGISのポイントに変換する
-                touchPoint = mMapView.screenToLocation(screenPoint);
+                mTouchPoint = mMapView.screenToLocation(screenPoint);
                 // タッチしたポイントを表示する
                 Bitmap bitmap = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
                 // new するやり方はAPI4から非推奨:new BitmapDrawable(bitmap);
                 BitmapDrawable bd = new BitmapDrawable(getResources(), bitmap);
                 PictureMarkerSymbol pms = new PictureMarkerSymbol(bd);
                 pms.loadAsync();
-                Graphic touchpoint = new Graphic(touchPoint, pms);
+                Graphic touchpoint = new Graphic(mTouchPoint, pms);
                 mPointRouteOverlay.getGraphics().add(touchpoint);
 
                 // ポイントからバッファを作成する:単位=m
-                Polygon bufferPolygon = GeometryEngine.buffer(touchPoint, 1000);
+                Polygon bufferPolygon = GeometryEngine.buffer(mTouchPoint, 1000);
                 // bufferの表示
                 SimpleFillSymbol fillSymbol = new SimpleFillSymbol(SimpleFillSymbol.Style.SOLID, Color.argb(50, 230, 0, 51), null);// 薄い赤だったと思う
                 Graphic bufferGraphic = new Graphic(bufferPolygon, fillSymbol);
@@ -179,6 +183,7 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * レイヤーからバッファ内のフィーチャを検索する
+     *
      * */
     private void findFeaturefromBuffer(Polygon pPolygon){
         Log.d(TAG, "findFeaturefromBuffer ");
@@ -226,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 解析のためにポータルにログインする
+     *
      * */
     public void callPortalLogin4Analytics(final List<Incident> pIncident){
         Log.d(TAG, "callPortalLogin4Analytics ");
@@ -272,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
 
                     // タッチしたポイントがFacility(このポイントを基準に最寄り施設を解析する)
                     List<Facility> facilities = new ArrayList();
-                    facilities.add(new Facility(touchPoint));
+                    facilities.add(new Facility(mTouchPoint));
                     closestFacilityParameters.setFacilities(facilities);
 
                     // バッファーから抽出したポイントがIncidents(解析先のポイント)
